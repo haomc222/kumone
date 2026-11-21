@@ -1,0 +1,71 @@
+import SwiftUI
+
+struct CompatInstant: Comparable {
+    let t: TimeInterval
+    static func < (a: CompatInstant, b: CompatInstant) -> Bool { a.t < b.t }
+}
+
+struct CompatDuration: Comparable {
+    let t: TimeInterval
+    var seconds: Double { t }
+    static func < (a: CompatDuration, b: CompatDuration) -> Bool { a.t < b.t }
+    static func >= (a: CompatDuration, b: CompatDuration) -> Bool { a.t >= b.t }
+}
+
+struct CompatClock {
+    var now: CompatInstant { CompatInstant(t: ProcessInfo.processInfo.systemUptime) }
+    func duration(to other: CompatInstant) -> CompatDuration {
+        CompatDuration(t: other.t - ProcessInfo.processInfo.systemUptime)
+    }
+}
+
+struct CompatViewThatFits<Content: View>: View {
+    let axes: Axis.Set
+    let content: Content
+
+    init(in axes: Axis.Set = [.horizontal, .vertical], @ViewBuilder content: () -> Content) {
+        self.axes = axes
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            ViewThatFits(in: axes) { content }
+        } else {
+            content
+        }
+    }
+}
+
+struct CompatLabeledContent<Label: View, Content: View>: View {
+    let label: Label
+    let content: Content
+
+    init(@ViewBuilder label: () -> Label, @ViewBuilder content: () -> Content) {
+        self.label = label()
+        self.content = content()
+    }
+
+    init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
+        self.label = label()
+        self.content = content()
+    }
+
+    init(_ title: String, @ViewBuilder content: () -> Content) where Label == Text {
+        self.label = Text(title)
+        self.content = content()
+    }
+
+    init<V>(_ title: String, value: V) where Label == Text, Content == Text {
+        self.label = Text(title)
+        self.content = Text(String(describing: value))
+    }
+
+    var body: some View {
+        HStack {
+            label
+            Spacer()
+            content.foregroundStyle(.secondary)
+        }
+    }
+}
