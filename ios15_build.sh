@@ -1,6 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 export APP_NAME=Kumone
+LOG="$RUNNER_TEMP/build.log"
 
 echo "=== merge PR #120 (iOS 15 compatibility) ==="
 git config user.email ci@ios15.local
@@ -18,23 +19,40 @@ else
 fi
 git log --oneline -3
 
-echo "=== apply iOS 15 patch ==="
+echo "=== apply base patch ==="
 python3 ios15_patch.py
+
+if [ -f ios15_fix.py ]; then
+  echo "=== apply round fix ==="
+  python3 ios15_fix.py
+fi
+
 echo "--- deployment targets ---"
-grep -n 'iOS("|IPHONEOS_DEPLOYMENT_TARGET|iOS: "|\.iOS(\.v' Package.swift ios/KumoneIOSPackage/Package.swift ios/Config/Shared.xcconfig ios/project.yml 2>/dev/null || true
+grep -nE 'iOS\(|IPHONEOS_DEPLOYMENT_TARGET|iOS: ' Package.swift ios/KumoneIOSPackage/Package.swift ios/Config/Shared.xcconfig ios/project.yml 2>/dev/null || true
 
 echo "=== build ==="
 xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS \
   -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath "$RUNNER_TEMP/dd" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-  build > "$RUNNER_TEMP/build.log" 2>&1 || true
+  build > "$LOG" 2>&1 || true
 
-echo "--- first swift errors ---"
-grep -E '\.swift:[0-9]+:[0-9]+: error:' "$RUNNER_TEMP/build.log" | head -80 || echo "(no swift errors matched)"
-grep -E '\*\* BUILD (SUCCEEDED|FAILED) \*\*' "$RUNNER_TEMP/build.log" || echo "(no BUILD line)"
+grep -E '\*\* BUILD (SUCCEEDED|FAILED) \*\*' "$LOG" || echo "(no BUILD line)"
 
-if grep -q 'error:' "$RUNNER_TEMP/build.log"; then
+if grep -q 'error:' "$LOG"; then
+  echo "=== swift errors ==="
+  grep -E '\.swift:[0-9]+:[0-9]+: error:' "$LOG" | sed -E 's#^.*/kumone/kumone/##' | sort -u | head -30
+  echo "=== context dumps ==="
+  grep -E '\.swift:[0-9]+:[0-9]+: error:' "$LOG" \
+    | sed -E 's#^.*/kumone/kumone/##' \
+    | awk -F: '{print $1":"$2}' | sort -u | head -10 \
+    | while IFS=: read -r file line; do
+        [ -f "$file" ] || continue
+        if [ "$line" -gt 14 ]; then start=$((line - 14)); else start=1; fi
+        end=$((line + 14))
+        echo "----- $file  (lines $start-$end) -----"
+        sed -n "$start,$end p" "$file" | awk -v s="$start" '{ printf "%d| %s\n", NR + s - 1, $0 }'
+      done
   echo "::error::编译失败，完整日志见 build-log artifact"
   exit 1
 fi
