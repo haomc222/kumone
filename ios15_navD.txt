@@ -1,0 +1,58 @@
+import SwiftUI
+
+final class CompatNavRegistry {
+    static let shared = CompatNavRegistry()
+    private var builders: [ObjectIdentifier: (Any) -> AnyView] = [:]
+
+    func register<D: Hashable, C: View>(_ type: D.Type, builder: @escaping (D) -> C) {
+        builders[ObjectIdentifier(type)] = { any in
+            guard let value = any as? D else { return AnyView(EmptyView()) }
+            return AnyView(builder(value))
+        }
+    }
+
+    func view(for any: Any) -> AnyView {
+        let value: Any = (any as? AnyHashable)?.base ?? any
+        return builders[ObjectIdentifier(type(of: value))]?(value) ?? AnyView(EmptyView())
+    }
+}
+
+final class CompatNavProxy {
+    static let shared = CompatNavProxy()
+    var push: ((AnyHashable) -> Void)?
+}
+
+struct CompatNavigationStack<PathValue: Hashable, Content: View>: View {
+    let path: Binding<[PathValue]>
+    let content: Content
+
+    init(path: Binding<[PathValue]>, @ViewBuilder content: () -> Content) {
+        self.path = path
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationStack(path: path) { content }
+        } else {
+            CompatInlineStack(path: path, root: content)
+        }
+    }
+}
+
+struct CompatStack<Content: View>: View {
+    let content: Content
+    @State private var path: [AnyHashable] = []
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationStack { content }
+        } else {
+            CompatInlineStack(path: $path, root: content)
+        }
+    }
+}
