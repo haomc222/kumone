@@ -1,0 +1,99 @@
+import SwiftUI
+
+struct CompatInlineStack<PathValue: Hashable, Root: View>: View {
+    let path: Binding<[PathValue]>
+    let root: Root
+
+    init(path: Binding<[PathValue]>, root: Root) {
+        self.path = path
+        self.root = root
+    }
+
+    var body: some View {
+        Group {
+            if let last = path.wrappedValue.last {
+                CompatNavRegistry.shared.view(for: last)
+                    .id(path.wrappedValue.count)
+                    .overlay(alignment: .topLeading) {
+                        Button {
+                            if !path.wrappedValue.isEmpty {
+                                path.wrappedValue.removeLast()
+                            }
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                                .font(.body.weight(.semibold))
+                                .padding(9)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .padding(8)
+                    }
+            } else {
+                root
+            }
+        }
+        .onAppear {
+            CompatNavProxy.shared.push = { any in
+                if let value = any.base as? PathValue {
+                    path.wrappedValue.append(value)
+                }
+            }
+        }
+    }
+}
+
+struct CompatNavigationLink<V: Hashable, Label: View>: View {
+    let value: V
+    let label: Label
+
+    init(value: V, @ViewBuilder label: () -> Label) {
+        self.value = value
+        self.label = label()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationLink(value: value) { label }
+        } else {
+            Button {
+                CompatNavProxy.shared.push?(AnyHashable(value))
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+struct CompatLabeledNavigationLink<V: Hashable>: View {
+    let title: String
+    let value: V
+
+    init(_ title: String, value: V) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationLink(title, value: value)
+        } else {
+            Button(title) {
+                CompatNavProxy.shared.push?(AnyHashable(value))
+            }
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func compatNavigationDestination<D: Hashable, C: View>(
+        for data: D.Type,
+        @ViewBuilder destination: @escaping (D) -> C
+    ) -> some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            self.navigationDestination(for: data, destination: destination)
+        } else {
+            self.onAppear { CompatNavRegistry.shared.register(data, builder: destination) }
+        }
+    }
+}
