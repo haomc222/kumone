@@ -1,0 +1,81 @@
+import SwiftUI
+
+// iOS 15 backports: clocks, ViewThatFits, LabeledContent, onGeometryChange.
+
+struct CompatInstant: Comparable {
+    let t: TimeInterval
+    static func < (a: CompatInstant, b: CompatInstant) -> Bool { a.t < b.t }
+}
+
+struct CompatDuration: Comparable {
+    let t: TimeInterval
+    var seconds: Double { t }
+    static func < (a: CompatDuration, b: CompatDuration) -> Bool { a.t < b.t }
+    static func >= (a: CompatDuration, b: CompatDuration) -> Bool { a.t >= b.t }
+}
+
+struct CompatClock {
+    var now: CompatInstant { CompatInstant(t: ProcessInfo.processInfo.systemUptime) }
+    func duration(to other: CompatInstant) -> CompatDuration {
+        CompatDuration(t: other.t - ProcessInfo.processInfo.systemUptime)
+    }
+}
+
+struct CompatViewThatFits<Content: View>: View {
+    let axes: Axis.Set
+    let content: Content
+
+    init(in axes: Axis.Set = [.horizontal, .vertical], @ViewBuilder content: () -> Content) {
+        self.axes = axes
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            ViewThatFits(in: axes) { content }
+        } else {
+            content
+        }
+    }
+}
+
+struct CompatLabeledContent<Value: CustomStringConvertible>: View {
+    let title: String
+    let value: Value
+
+    init(_ title: String, value: Value) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value.description)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct CompatGeometryKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    func compatOnGeometryChange<T: Equatable>(
+        for type: T.Type,
+        transform: @escaping (GeometryProxy) -> T,
+        action: @escaping (T) -> Void
+    ) -> some View {
+        self.background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: CompatGeometryKey.self, value: [:])
+                    .onAppear { action(transform(proxy)) }
+            }
+        )
+    }
+}
