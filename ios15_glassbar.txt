@@ -1,0 +1,77 @@
+#if os(iOS)
+import SwiftUI
+
+struct GlassTabBar: View {
+    struct Item: Identifiable {
+        let tab: IOSTab
+        let title: LocalizedStringKey
+        let icon: String
+        var id: IOSTab { tab }
+    }
+
+    let items: [Item]
+    @Binding var selection: IOSTab
+    var onReselect: (IOSTab) -> Void = { _ in }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let innerInset: CGFloat = 4
+    private let contentHeight: CGFloat = 56
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(items) { item in
+                Button {
+                    if selection == item.tab {
+                        onReselect(item.tab)
+                    } else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            selection = item.tab
+                        }
+                    }
+                } label: {
+                    itemLabel(item)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    if selection == item.tab {
+                        selectionPill
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: contentHeight)
+        .padding(innerInset)
+        .background { Capsule().fill(.regularMaterial) }
+        .overlay {
+            Capsule().strokeBorder(.white.opacity(colorScheme == .dark ? 0.08 : 0.22), lineWidth: 0.5)
+        }
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.10), radius: 12, y: 4)
+        .padding(.horizontal, 12)
+    }
+
+    private func itemLabel(_ item: Item) -> some View {
+        let isSelected = selection == item.tab
+        return VStack(spacing: 3) {
+            Image(systemName: item.icon)
+                .font(.system(size: 23, weight: .semibold))
+                .symbolVariant(.fill)
+            Text(item.title)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Color.primary.opacity(0.8)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private var selectionPill: some View {
+        Capsule(style: .continuous)
+            .fill(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.075))
+    }
+}
+#endif
