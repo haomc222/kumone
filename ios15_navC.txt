@@ -1,0 +1,29 @@
+import SwiftUI
+
+struct CompatLegacyPush: View {
+    @Binding var path: [AnyHashable]
+    let depth: Int
+
+    private var isActive: Binding<Bool> {
+        Binding(
+            get: { path.count > depth },
+            set: { active in
+                if !active, path.count > depth {
+                    path.removeSubrange(depth...)
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        NavigationLink(isActive: isActive) {
+            if path.indices.contains(depth) {
+                CompatNavRegistry.shared.view(for: path[depth])
+                    .background(CompatLegacyPush(path: $path, depth: depth + 1))
+            }
+        } label: {
+            EmptyView()
+        }
+        .hidden()
+    }
+}
