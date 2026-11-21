@@ -5,6 +5,47 @@ git config user.email ci@ios15.local
 git config user.name ios15-ci
 git remote add pr120 https://github.com/Perfect9s/kumone.git 2>/dev/null || true
 git fetch --no-tags pr120 fix/ios15-compatibility && git checkout FETCH_HEAD -- Sources/Kumone/Features/CompatibilityNavigation.swift Sources/Kumone/Core/PlatformCompatibility.swift
+
+echo "=== resolve version from upstream latest release ==="
+VERSION=$(curl -fsS https://api.github.com/repos/missuo/kumone/releases/latest \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))" 2>/dev/null || echo "0.3.37")
+BUILD_NUMBER=$(git rev-list --count HEAD)
+echo "VERSION=$VERSION BUILD=$BUILD_NUMBER"
+
+python3 ios15_patch.py
+for f in $(ls ios15_fix*.py 2>/dev/null | sort -V); do echo "=== $f ==="; python3 "$f"; done
+
+xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -derivedDataPath "$RUNNER_TEMP/dd" \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+  MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  build > "$LOG" 2>&1
+
+grep -E '\*\* BUILD (SUCCEEDED|FAILED) \*\*' "$LOG"
+if grep -q 'error:' "$LOG"; then
+  echo "=== swift errors ==="
+  grep -E '\.swift:[0-9]+:[0-9]+: error:' "$LOG" | sed -E 's#^.*/kumone/kumone/##' | sort -u | head -40
+  exit 1
+fi
+
+APP="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/KumoneIOS.app"
+echo "--- bundle version ---"
+/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+if otool -L "$APP/KumoneIOS" | grep -qi CoreTransferable; then echo "::error::still links CoreTransferable"; exit 1; fi
+mkdir -p "$RUNNER_TEMP/payload/Payload" dist
+cp -R "$APP" "$RUNNER_TEMP/payload/Payload/"
+(cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/dist/Kumone-ios15-$VERSION.ipa" Payload)
+ls -la dist
+exit 0
+#!/bin/bash
+set -uo pipefail
+LOG="$RUNNER_TEMP/build.log"
+git config user.email ci@ios15.local
+git config user.name ios15-ci
+git remote add pr120 https://github.com/Perfect9s/kumone.git 2>/dev/null || true
+git fetch --no-tags pr120 fix/ios15-compatibility && git checkout FETCH_HEAD -- Sources/Kumone/Features/CompatibilityNavigation.swift Sources/Kumone/Core/PlatformCompatibility.swift
 python3 ios15_patch.py
 for f in $(ls ios15_fix*.py 2>/dev/null | sort -V); do echo "=== $f ==="; python3 "$f"; done
 xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > "$LOG" 2>&1
