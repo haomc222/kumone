@@ -1,0 +1,136 @@
+import SwiftUI
+
+// iOS 15 backports: clocks, layout helpers, navigation split view.
+
+struct CompatInstant: Comparable {
+    let t: TimeInterval
+    static func < (a: CompatInstant, b: CompatInstant) -> Bool { a.t < b.t }
+}
+
+struct CompatDuration: Comparable {
+    let t: TimeInterval
+    var seconds: Double { t }
+    static func < (a: CompatDuration, b: CompatDuration) -> Bool { a.t < b.t }
+    static func >= (a: CompatDuration, b: CompatDuration) -> Bool { a.t >= b.t }
+}
+
+struct CompatClock {
+    var now: CompatInstant { CompatInstant(t: ProcessInfo.processInfo.systemUptime) }
+    func duration(to other: CompatInstant) -> CompatDuration {
+        CompatDuration(t: other.t - ProcessInfo.processInfo.systemUptime)
+    }
+}
+
+struct CompatViewThatFits<Content: View>: View {
+    let axes: Axis.Set
+    let content: Content
+
+    init(in axes: Axis.Set = [.horizontal, .vertical], @ViewBuilder content: () -> Content) {
+        self.axes = axes
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            ViewThatFits(in: axes) { content }
+        } else {
+            content
+        }
+    }
+}
+
+struct CompatLabeledContent<Label: View, Content: View>: View {
+    let label: Label
+    let content: Content
+
+    init(@ViewBuilder label: () -> Label, @ViewBuilder content: () -> Content) {
+        self.label = label()
+        self.content = content()
+    }
+
+    init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
+        self.label = label()
+        self.content = content()
+    }
+
+    init(_ title: String, @ViewBuilder content: () -> Content) where Label == Text {
+        self.label = Text(title)
+        self.content = content()
+    }
+
+    init<V>(_ title: String, value: V) where Label == Text, Content == Text {
+        self.label = Text(title)
+        self.content = Text(String(describing: value))
+    }
+
+    var body: some View {
+        HStack {
+            label
+            Spacer()
+            content.foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct CompatGeometryKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    func compatOnGeometryChange<T: Equatable>(
+        for type: T.Type,
+        transform: @escaping (GeometryProxy) -> T,
+        action: @escaping (T) -> Void
+    ) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { action(transform(proxy)) }
+            }
+        )
+    }
+
+    @ViewBuilder
+    func compatNoopToolbarBackground<A, B>(_ background: A, for bars: B) -> some View { self }
+
+    @ViewBuilder
+    func compatNoopToolbarBackground<A>(_ background: A) -> some View { self }
+}
+
+struct CompatSplitViewVisibility: Equatable {
+    var raw: Int = 0
+    static let all = CompatSplitViewVisibility(raw: 0)
+    static let doubleColumn = CompatSplitViewVisibility(raw: 1)
+    static let detailOnly = CompatSplitViewVisibility(raw: 2)
+    init(raw: Int = 0) { self.raw = raw }
+}
+
+struct CompatNavigationSplitView<Sidebar: View, Detail: View>: View {
+    let sidebar: Sidebar
+    let detail: Detail
+
+    init(columnVisibility: Binding<CompatSplitViewVisibility>, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar()
+        self.detail = detail()
+    }
+
+    init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar()
+        self.detail = detail()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationSplitView { sidebar } detail: { detail }
+        } else {
+            HStack(spacing: 0) {
+                sidebar.frame(width: 250)
+                Divider()
+                detail
+            }
+        }
+    }
+}
