@@ -1,0 +1,57 @@
+import SwiftUI
+
+final class CompatNavRegistry {
+    static let shared = CompatNavRegistry()
+    private var builders: [ObjectIdentifier: (Any) -> AnyView] = [:]
+
+    func register<D: Hashable, C: View>(_ type: D.Type, builder: @escaping (D) -> C) {
+        builders[ObjectIdentifier(type)] = { any in
+            guard let value = any as? D else { return AnyView(EmptyView()) }
+            return AnyView(builder(value))
+        }
+    }
+
+    func view(for any: Any) -> AnyView {
+        builders[ObjectIdentifier(type(of: any))]?(any) ?? AnyView(EmptyView())
+    }
+}
+
+final class CompatNavProxy {
+    static let shared = CompatNavProxy()
+    var push: ((AnyHashable) -> Void)?
+}
+
+struct CompatNavigationStack<PathValue: Hashable, Content: View>: View {
+    let path: Binding<[PathValue]>
+    let content: Content
+
+    init(path: Binding<[PathValue]>, @ViewBuilder content: () -> Content) {
+        self.path = path
+        self.content = content()
+    }
+
+    private var anyPath: Binding<[AnyHashable]> {
+        Binding(
+            get: { path.wrappedValue.map { AnyHashable($0) } },
+            set: { newValue in path.wrappedValue = newValue.compactMap { $0.base as? PathValue } }
+        )
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationStack(path: path) { content }
+        } else {
+            NavigationView {
+                content.background(CompatLegacyPush(path: anyPath, depth: 0))
+            }
+            .navigationViewStyle(.stack)
+            .onAppear {
+                CompatNavProxy.shared.push = { any in
+                    if let value = any.base as? PathValue {
+                        path.wrappedValue.append(value)
+                    }
+                }
+            }
+        }
+    }
+}
