@@ -1,0 +1,82 @@
+name: ios15-build
+
+on:
+  push:
+    branches: [main, ios15]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge PR 120 (iOS 15 compatibility)
+        continue-on-error: true
+        run: |
+          git config user.email ci@ios15.local
+          git config user.name ios15-ci
+          git remote add pr120 https://github.com/Perfect9s/kumone.git || true
+          git fetch --no-tags pr120 fix/ios15-compatibility
+          git cherry-pick -X theirs FETCH_HEAD || {
+            echo "::warning::cherry-pick 冲突，已按 PR 侧解决并提交"
+            git status --short | head -50
+            git add -A
+            git commit -m "wip: pr120 with conflicts" || true
+          }
+          git log --oneline -3
+
+      - name: Apply iOS 15 patch
+        run: |
+          python3 ios15_patch.py
+          echo "--- deployment targets after patch ---"
+          grep -n 'iOS("|IPHONEOS_DEPLOYMENT_TARGET|iOS: "|.iOS(.v' Package.swift ios/KumoneIOSPackage/Package.swift ios/Config/Shared.xcconfig ios/project.yml || true
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild -workspace ios/KumoneIOS.xcworkspace -scheme KumoneIOS \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "${{ runner.temp }}/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build > "${{ runner.temp }}/build.log" 2>&1 || true
+          grep -E '(^|/)[^ ]*\.swift:[0-9]+:[0-9]+: error:' "${{ runner.temp }}/build.log" | head -80 || echo "no swift errors matched"
+          grep -E '^\*\* BUILD (SUCCEEDED|FAILED) \*\*' "${{ runner.temp }}/build.log" || true
+          if grep -qE 'error:' "${{ runner.temp }}/build.log"; then
+            echo "::error::编译失败，完整日志见 build-log artifact"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+
+      - name: Package and verify
+        if: success()
+        run: |
+          APP="${{ runner.temp }}/dd/Build/Products/Release-iphoneos/KumoneIOS.app"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+          xcrun vtool -show-build "$APP/KumoneIOS" | head -20 || true
+          if otool -L "$APP/KumoneIOS" | grep -qi CoreTransferable; then
+            echo "::error::仍链接 CoreTransferable，iOS 15 上会在 dyld 阶段中止"
+            exit 1
+          fi
+          mkdir -p "${{ runner.temp }}/payload/Payload" dist
+          cp -R "$APP" "${{ runner.temp }}/payload/Payload/"
+          (cd "${{ runner.temp }}/payload" && zip -qry "$GITHUB_WORKSPACE/dist/Kumone-ios15.ipa" Payload)
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios15-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
