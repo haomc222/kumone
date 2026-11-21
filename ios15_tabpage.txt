@@ -1,0 +1,23 @@
+import SwiftUI
+
+/// iOS 15–25 tab page wrapper: keeps the floating mini player above the system
+/// tab bar without any custom container maths.
+struct IOSLegacyTabPage<Content: View>: View {
+    @EnvironmentObject private var player: PlayerService
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if player.hasCurrentTrack {
+                    IOSMiniPlayerBar(presentation: .legacyOverlay)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 6)
+                }
+            }
+    }
+}
