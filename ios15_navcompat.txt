@@ -1,0 +1,81 @@
+import SwiftUI
+
+// iOS 15 backports for iOS 16 navigation APIs.
+
+struct CompatNavigationStack<PathValue, Content: View>: View {
+    let path: Binding<[PathValue]>
+    let content: Content
+
+    init(path: Binding<[PathValue]>, @ViewBuilder content: () -> Content) {
+        self.path = path
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationStack(path: path) { content }
+        } else {
+            #if os(iOS)
+            NavigationView { content }.navigationViewStyle(.stack)
+            #else
+            NavigationView { content }
+            #endif
+        }
+    }
+}
+
+struct CompatStack<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationStack { content }
+        } else {
+            #if os(iOS)
+            NavigationView { content }.navigationViewStyle(.stack)
+            #else
+            NavigationView { content }
+            #endif
+        }
+    }
+}
+
+struct CompatNavigationLink<V: Hashable, Label: View>: View {
+    let value: V
+    let label: Label
+
+    init(value: V, @ViewBuilder label: () -> Label) {
+        self.value = value
+        self.label = label()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationLink(value: value) { label }
+        } else {
+            label
+        }
+    }
+}
+
+struct CompatLabeledNavigationLink<V: Hashable>: View {
+    let title: String
+    let value: V
+
+    init(_ title: String, value: V) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationLink(title, value: value)
+        } else {
+            Text(title)
+        }
+    }
+}
