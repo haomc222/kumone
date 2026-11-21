@@ -1,0 +1,61 @@
+name: ios15-sync
+
+# 自动跟随上游：合并 missuo/kumone 的 main，重新打 iOS 15 补丁并出包。
+# 手动触发：Actions -> ios15-sync -> Run workflow
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream and stamp version
+        run: |
+          git config user.email ci@ios15.local
+          git config user.name ios15-ci
+          git remote add upstream https://github.com/missuo/kumone.git || true
+          git fetch --no-tags upstream main
+          git fetch upstream 'refs/tags/*:refs/tags/*' || true
+          if git merge --no-edit upstream/main; then
+            echo "merged upstream/main"
+          else
+            echo "::warning::merge conflict — keeping the ios15 pipeline files"
+            git checkout --ours .github/workflows/ci.yml ios15_build.sh ios15_build2.sh 2>/dev/null || true
+            git add -A
+            git commit -m "sync: upstream merge with ios15 pipeline kept" || true
+          fi
+          VERSION=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null | sed 's/^v//')
+          [ -n "$VERSION" ] || VERSION=0.3.37
+          echo "$VERSION" > ios15_version.txt
+          git add ios15_version.txt
+          git commit -m "sync: version $VERSION" || true
+          git push origin main || true
+          cat ios15_version.txt
+
+      - name: Build iOS 15 IPA
+        run: bash ios15_build2.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios15-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
