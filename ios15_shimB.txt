@@ -1,0 +1,56 @@
+import SwiftUI
+
+extension View {
+    func compatOnGeometryChange<T: Equatable>(
+        for type: T.Type,
+        transform: @escaping (GeometryProxy) -> T,
+        action: @escaping (T) -> Void
+    ) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.onAppear { action(transform(proxy)) }
+            }
+        )
+    }
+
+    @ViewBuilder
+    func compatNoopToolbarBackground<A, B>(_ background: A, for bars: B) -> some View { self }
+
+    @ViewBuilder
+    func compatNoopToolbarBackground<A>(_ background: A) -> some View { self }
+}
+
+struct CompatSplitViewVisibility: Equatable {
+    var raw: Int = 0
+    static let all = CompatSplitViewVisibility(raw: 0)
+    static let doubleColumn = CompatSplitViewVisibility(raw: 1)
+    static let detailOnly = CompatSplitViewVisibility(raw: 2)
+    init(raw: Int = 0) { self.raw = raw }
+}
+
+struct CompatNavigationSplitView<Sidebar: View, Detail: View>: View {
+    let sidebar: Sidebar
+    let detail: Detail
+
+    init(columnVisibility: Binding<CompatSplitViewVisibility>, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar()
+        self.detail = detail()
+    }
+
+    init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar()
+        self.detail = detail()
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            NavigationSplitView { sidebar } detail: { detail }
+        } else {
+            HStack(spacing: 0) {
+                sidebar.frame(width: 250)
+                Divider()
+                detail
+            }
+        }
+    }
+}
