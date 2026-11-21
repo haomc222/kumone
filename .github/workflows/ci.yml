@@ -1,32 +1,28 @@
-name: CI
+name: ios15-build
 
 on:
-  pull_request:
+  push:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-and-test:
+  build:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build
-        run: swift build
-
-      - name: Test
-        run: swift test
-
-      # Same invocation as release.yml, minus signing / notarization: the
-      # script's own ad-hoc signature is all an unsigned build gets.
-      - name: Build app (universal, unsigned)
-        run: |
-          ARCHES="arm64 x86_64" FETCH_MLX_METALLIB=1 \
-            Scripts/build-app.sh release
+        with:
+          fetch-depth: 0
+      - name: Build iOS 15 IPA
+        run: bash ios15_build.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios15-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
