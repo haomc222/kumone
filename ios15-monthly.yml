@@ -1,0 +1,77 @@
+name: ios15-monthly
+
+# 每月 1 号 03:17 UTC 检查一次上游；没有变化或版本相同就跳过，不出包、不刷邮件。
+# 手动：Actions -> ios15-monthly -> Run workflow
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios15-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream and detect change
+        id: sync
+        run: |
+          git config user.email ci@ios15.local
+          git config user.name ios15-ci
+          BEFORE=$(git rev-parse HEAD)
+          PREV=$(cat ios15_version.txt 2>/dev/null | tr -d '[:space:]')
+          git remote add upstream https://github.com/missuo/kumone.git || true
+          git fetch --no-tags upstream main
+          git fetch upstream 'refs/tags/*:refs/tags/*' || true
+          if git merge --no-edit upstream/main; then
+            echo "merged upstream/main"
+          else
+            echo "::warning::merge conflict - keeping ios15 pipeline files"
+            git checkout --ours .github/workflows/ci.yml ios15_build.sh ios15_build2.sh 2>/dev/null || true
+            git add -A
+            git commit -m "sync: merge upstream keeping ios15 pipeline" || true
+          fi
+          VERSION=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null | sed 's/^v//')
+          [ -n "$VERSION" ] || VERSION=0.3.38
+          echo "$VERSION" > ios15_version.txt
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" = "$AFTER" ] && [ "$PREV" = "$VERSION" ]; then
+            echo "no change - skipping build"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "change detected - building"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          git add -A
+          git commit -m "sync: version $VERSION" || true
+          git push origin main || true
+          cat ios15_version.txt
+
+      - name: Build iOS 15 IPA
+        if: steps.sync.outputs.changed == 'true'
+        run: bash ios15_build2.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        if: success() && steps.sync.outputs.changed == 'true'
+        with:
+          name: ios15-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
